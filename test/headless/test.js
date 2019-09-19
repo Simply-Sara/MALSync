@@ -4,6 +4,8 @@ const pluginStealth = require("puppeteer-extra-plugin-stealth");
 
 const fs = require('fs');
 const script = fs.readFileSync(__dirname + '/../dist/testCode.js', 'utf8');
+const request = require('request');
+const curTime = Date.now();
 
 var testsArray = [
   {
@@ -1337,26 +1339,41 @@ var testsArray = [
 
 // Define global variables
 let browser
+let tested = {};
 let page
 let debugging = false;
-//var caseTitle = 'Turkanime';
+var caseTitle = 'Turkanime';
 
 before(async function () {
   puppeteer.use(pluginStealth());
-  browser = await puppeteer.launch({ headless: true })
+  browser = await puppeteer.launch({ headless: true });
+  tested = await getData();
 })
 
 beforeEach(async function () {
   page = await browser.newPage()
-  await page.setViewport({ width: 800, height: 600 })
+  await page.setViewport({ width: 800, height: 600 });
+  var key = encodeURIComponent(this.currentTest.parent.title+'-'+this.currentTest.title).replace(/\./g, ',');;
+  if(typeof tested[key] !== 'undefined' && curTime < (tested[key].time + (24 * 60 * 60 * 1000))) {
+    this.skip();
+  }
 })
 
 afterEach(async function () {
   await page.close()
+  var key = encodeURIComponent(this.currentTest.parent.title+'-'+this.currentTest.title).replace(/\./g, ',');
+  if (this.currentTest.state === 'failed') {
+    delete tested[key];
+  }else if (this.currentTest.state === 'passed') {
+    tested[key] = {
+      'time': curTime,
+    };
+  }
 })
 
 after(async function () {
-  await browser.close()
+  await browser.close();
+  await writeData(tested);
 })
 
 testsArray.forEach(function(testPage) {
@@ -1429,3 +1446,22 @@ testsArray.forEach(function(testPage) {
     });
   });
 })
+
+//helper
+function getData(){
+  return new Promise(function(resolve, reject) {
+    request('https://kissanimelist.firebaseio.com/travis.json', { json: true }, (err, res, body) => {
+      if (err) {
+        console.error(err);
+        reject();
+        return;
+      }
+      resolve(body);
+    });
+  });
+}
+
+function writeData(data){
+  request.put({url:'https://kissanimelist.firebaseio.com/travis.json', body: JSON.stringify( data)});
+}
+
